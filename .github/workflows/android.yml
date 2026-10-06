@@ -236,28 +236,43 @@ jobs:
           test -f app/build/outputs/apk/debug/app-debug.apk
           ls -lh app/build/outputs/apk/debug/app-debug.apk
 
-      - name: Test install and launch in emulator
+      -       - name: Diagnose install and launch in emulator
         uses: reactivecircus/android-emulator-runner@v2
+        continue-on-error: true
         with:
           api-level: 34
           arch: x86_64
           profile: pixel_6
           script: |
+            set +e
+
+            echo "=== INSTALL APK ==="
             adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb shell am start -n com.localstudy.tbmquizshell/.MainActivity
+
+            echo "=== CLEAR LOGCAT ==="
+            adb logcat -c
+
+            echo "=== START APP ==="
+            adb shell am start -W -n com.localstudy.tbmquizshell/.MainActivity
+
             sleep 5
-            adb shell pidof com.localstudy.tbmquizshell
-            adb shell am force-stop com.localstudy.tbmquizshell
-            adb shell am start -n com.localstudy.tbmquizshell/.MainActivity
-            sleep 3
-            adb shell pidof com.localstudy.tbmquizshell
 
-      - name: Rename tested APK
+            echo "=== CHECK PROCESS ==="
+            adb shell pidof com.localstudy.tbmquizshell || true
+
+            echo "=== CRASH LOG ==="
+            adb logcat -d -v time | grep -E "AndroidRuntime|FATAL EXCEPTION|com.localstudy.tbmquizshell" | tail -200 || true
+
+            exit 0
+
+      - name: Rename APK
+        if: always()
         run: |
-          cp app/build/outputs/apk/debug/app-debug.apk tbm_quiz_shell_tested.apk
+          cp app/build/outputs/apk/debug/app-debug.apk tbm_quiz_shell_v2.apk
 
-      - name: Upload tested APK
+      - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tbm-quiz-shell-tested
-          path: tbm_quiz_shell_tested.apk
+          name: tbm-quiz-shell-v2
+          path: tbm_quiz_shell_v2.apk

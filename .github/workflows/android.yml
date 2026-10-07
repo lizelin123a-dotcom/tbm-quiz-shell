@@ -1,13 +1,19 @@
-name: Build and test Android APK
+name: Build TBM Quiz APK
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    paths:
+      - 'tbm_app_source.zip'
+      - '.github/workflows/android.yml'
+
+permissions:
+  contents: write
 
 jobs:
-  build:
+  build-test-release:
     runs-on: ubuntu-latest
 
     steps:
@@ -18,261 +24,87 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.10.2"
+          gradle-version: '8.10.2'
 
-      - name: Create Android project
+      - name: Check source package
+        run: |
+          test -f tbm_app_source.zip
+          unzip -t tbm_app_source.zip
+
+      - name: Extract Android source
+        run: |
+          unzip -oq tbm_app_source.zip -d .
+          test -f settings.gradle
+          test -f app/build.gradle
+          test -f app/src/main/AndroidManifest.xml
+          test -f app/src/main/java/com/localstudy/tbmquiz/MainActivity.java
+          test -f app/src/main/assets/index.html
+          test -f app/src/main/assets/data.js
+
+      - name: Build signed release APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Verify APK structure and signature
         shell: bash
         run: |
-          mkdir -p app/src/main/java/com/localstudy/tbmquizshell
-          mkdir -p app/src/main/res/values
+          APK='app/build/outputs/apk/release/app-release.apk'
+          test -f "$APK"
+          BUILD_TOOLS="$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          echo "Using build-tools: $BUILD_TOOLS"
+          "$BUILD_TOOLS/aapt" dump badging "$APK" | tee apk_badging.txt
+          "$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK" | tee apk_signature.txt
+          grep -q "package: name='com.localstudy.tbmquiz'" apk_badging.txt
+          cp "$APK" TBM_Quiz_v3.apk
 
-          cat > settings.gradle <<'EOF'
-          pluginManagement {
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          dependencyResolutionManagement {
-              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.name = "TBMQuizShell"
-          include(":app")
-          EOF
-
-          cat > build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application' version '8.7.3' apply false
-          }
-          EOF
-
-          cat > gradle.properties <<'EOF'
-          org.gradle.jvmargs=-Xmx2g -Dfile.encoding=UTF-8
-          android.useAndroidX=false
-          EOF
-
-          cat > app/build.gradle <<'EOF'
-          plugins {
-              id 'com.android.application'
-          }
-
-          android {
-              namespace 'com.localstudy.tbmquizshell'
-              compileSdk 35
-
-              defaultConfig {
-                  applicationId 'com.localstudy.tbmquizshell'
-                  minSdk 26
-                  targetSdk 35
-                  versionCode 200
-                  versionName '2.0'
-              }
-          }
-          EOF
-
-          cat > app/src/main/AndroidManifest.xml <<'EOF'
-          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <application
-                  android:allowBackup="true"
-                  android:label="TBM刷题测试壳"
-                  android:theme="@style/AppTheme">
-
-                  <activity
-                      android:name=".MainActivity"
-                      android:exported="true">
-
-                      <intent-filter>
-                          <action android:name="android.intent.action.MAIN" />
-                          <category android:name="android.intent.category.LAUNCHER" />
-                      </intent-filter>
-
-                  </activity>
-              </application>
-          </manifest>
-          EOF
-
-          cat > app/src/main/res/values/styles.xml <<'EOF'
-          <resources>
-              <style name="AppTheme" parent="android:style/Theme.Material.Light.NoActionBar">
-                  <item name="android:fontFamily">sans</item>
-              </style>
-          </resources>
-          EOF
-
-          cat > app/src/main/java/com/localstudy/tbmquizshell/MainActivity.java <<'EOF'
-          package com.localstudy.tbmquizshell;
-
-          import android.app.Activity;
-          import android.os.Bundle;
-          import android.graphics.Color;
-          import android.view.Gravity;
-          import android.view.ViewGroup;
-          import android.widget.Button;
-          import android.widget.LinearLayout;
-          import android.widget.TextView;
-          import android.content.SharedPreferences;
-
-          public class MainActivity extends Activity {
-
-              @Override
-              protected void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-
-                  SharedPreferences prefs =
-                          getSharedPreferences("tbm_shell", MODE_PRIVATE);
-
-                  int count = prefs.getInt("open_count", 0) + 1;
-
-                  prefs.edit()
-                          .putInt("open_count", count)
-                          .apply();
-
-                  float d = getResources()
-                          .getDisplayMetrics()
-                          .density;
-
-                  int pad = (int)(24 * d);
-
-                  LinearLayout root =
-                          new LinearLayout(this);
-
-                  root.setOrientation(
-                          LinearLayout.VERTICAL);
-
-                  root.setGravity(
-                          Gravity.CENTER_HORIZONTAL);
-
-                  root.setPadding(
-                          pad,
-                          pad * 2,
-                          pad,
-                          pad);
-
-                  root.setBackgroundColor(
-                          Color.rgb(247,248,250));
-
-                  TextView title =
-                          new TextView(this);
-
-                  title.setText(
-                          "TBM 标准化刷题");
-
-                  title.setTextSize(28);
-                  title.setGravity(Gravity.CENTER);
-
-                  root.addView(title);
-
-                  TextView status =
-                          new TextView(this);
-
-                  status.setText(
-                          "\n标准 Android APK 已成功启动\n\n"
-                          + "这是干净测试版本。\n"
-                          + "暂时不含 PPT、题库和现场照片。\n\n"
-                          + "本机累计启动："
-                          + count
-                          + " 次");
-
-                  status.setTextSize(18);
-                  status.setGravity(Gravity.CENTER);
-
-                  root.addView(status);
-
-                  Button button =
-                          new Button(this);
-
-                  button.setText("测试按钮");
-
-                  button.setOnClickListener(
-                          v -> button.setText(
-                                  "按钮正常 ✓"));
-
-                  LinearLayout.LayoutParams params =
-                          new LinearLayout.LayoutParams(
-                                  ViewGroup.LayoutParams.MATCH_PARENT,
-                                  ViewGroup.LayoutParams.WRAP_CONTENT);
-
-                  params.topMargin = pad;
-
-                  root.addView(
-                          button,
-                          params);
-
-                  TextView next =
-                          new TextView(this);
-
-                  next.setText(
-                          "\n这个版本通过后再加入：\n"
-                          + "选择题 → 填空题 → PPT出处 → "
-                          + "现场核验 → 拍照记录");
-
-                  next.setTextSize(16);
-                  next.setGravity(Gravity.CENTER);
-
-                  root.addView(next);
-
-                  setContentView(root);
-              }
-          }
-          EOF
-
-      - name: Build APK
-        run: gradle :app:assembleDebug --stacktrace
-
-      - name: Check APK exists
-        run: |
-          test -f app/build/outputs/apk/debug/app-debug.apk
-          ls -lh app/build/outputs/apk/debug/app-debug.apk
-
-      - name: Diagnose install and launch in emulator
+      - name: Install and launch on Android 34 emulator
         uses: reactivecircus/android-emulator-runner@v2
-        continue-on-error: true
         with:
           api-level: 34
           arch: x86_64
           profile: pixel_6
           script: |
-            set +e
-
-            echo "=== INSTALL APK ==="
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-
-            echo "=== CLEAR LOGCAT ==="
+            set -e
+            adb install -r TBM_Quiz_v3.apk
+            adb shell pm grant com.localstudy.tbmquiz android.permission.CAMERA || true
             adb logcat -c
+            adb shell am start -W -n com.localstudy.tbmquiz/.MainActivity
+            sleep 6
+            PID="$(adb shell pidof com.localstudy.tbmquiz | tr -d '\r')"
+            echo "PID=$PID"
+            test -n "$PID"
+            adb shell am force-stop com.localstudy.tbmquiz
+            adb shell am start -W -n com.localstudy.tbmquiz/.MainActivity
+            sleep 4
+            PID2="$(adb shell pidof com.localstudy.tbmquiz | tr -d '\r')"
+            echo "PID2=$PID2"
+            test -n "$PID2"
+            adb logcat -d -v time | grep -E "AndroidRuntime|FATAL EXCEPTION|com.localstudy.tbmquiz" | tail -200 > launch_log.txt || true
+            ! grep -q "FATAL EXCEPTION" launch_log.txt
 
-            echo "=== START APP ==="
-            adb shell am start -W -n com.localstudy.tbmquizshell/.MainActivity
-
-            sleep 5
-
-            echo "=== CHECK PROCESS ==="
-            adb shell pidof com.localstudy.tbmquizshell || true
-
-            echo "=== CRASH LOG ==="
-            adb logcat -d -v time | grep -E "AndroidRuntime|FATAL EXCEPTION|com.localstudy.tbmquizshell" | tail -200 || true
-
-            exit 0
-
-      - name: Rename APK
-        if: always()
-        run: |
-          cp app/build/outputs/apk/debug/app-debug.apk tbm_quiz_shell_v2.apk
-
-      - name: Upload APK
+      - name: Upload APK artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: tbm-quiz-shell-v2
-          path: tbm_quiz_shell_v2.apk
+          name: TBM-Quiz-v3-APK
+          path: |
+            TBM_Quiz_v3.apk
+            apk_badging.txt
+            apk_signature.txt
+            launch_log.txt
+          if-no-files-found: warn
+
+      - name: Publish direct APK release
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="tbm-v3-${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" TBM_Quiz_v3.apk \
+            --target "$GITHUB_SHA" \
+            --title "TBM标准化刷题 v3（已通过模拟器安装启动测试）" \
+            --notes "基于最新PDF题库构建。已完成标准Android编译、APK结构/签名校验、Android 34模拟器安装与两次启动测试。下载 TBM_Quiz_v3.apk 直接安装。"
